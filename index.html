@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin Hub</title>
+<style>
+:root{--bg:#11141d;--panel:#1a1f2d;--line:#2a3144;--text:#e7ebf4;--muted:#9aa4bb;--accent:#6c95ff;--warm:#ffb454;--danger:#ff7a7a}
+@media (prefers-color-scheme:light){:root{--bg:#f4f6fb;--panel:#fff;--line:#d9dfec;--text:#1a2033;--muted:#5d6783;--accent:#2f5fe0;--warm:#b36b00;--danger:#c0392b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.6rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input{flex:1;min-width:200px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit}
+button{padding:11px 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.msg{min-height:1.4em;margin:8px 0;color:var(--muted);font-size:.9rem}
+.msg.err{color:var(--danger)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 22px}
+.chip{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 12px;border:1px solid var(--line);border-radius:99px;background:var(--panel);font-size:.9rem}
+.chip button{padding:2px 8px;border:0;border-radius:99px;background:transparent;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:16px}
+.card{padding:0;overflow:hidden;text-align:left;border-radius:12px}
+.poster{display:grid;place-items:center;width:100%;aspect-ratio:2/3;object-fit:cover;font-size:3rem;font-weight:700;color:#fff}
+.card .t{padding:10px 10px 2px;font-weight:600}
+.card .p{padding:0 10px 10px;font-size:.8rem;color:var(--warm)}
+dialog{width:min(720px,94vw);padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+video,iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:10px;background:#000}
+.x{float:right}
+</style>
+</head>
+<body>
+<main>
+  <h1>Plugin Hub</h1>
+  <p class="sub">Instalá plugins de la comunidad y buscá su contenido en un solo lugar.</p>
+  <form class="row" id="installForm">
+    <input id="installInput" placeholder="usuario/repositorio o URL de manifest.json" aria-label="Plugin a instalar">
+    <button class="primary">Instalar plugin</button>
+    <button type="button" id="demoBtn">Probar con el demo</button>
+  </form>
+  <div class="msg" id="msg" role="status"></div>
+  <div class="chips" id="chips"></div>
+  <form class="row" id="searchForm">
+    <input id="q" type="search" placeholder="¿Qué querés ver?" aria-label="Buscar">
+    <button class="primary">Buscar</button>
+  </form>
+  <div class="grid" id="grid"></div>
+  <p class="msg" id="empty"></p>
+</main>
+<dialog id="dlg"></dialog>
+<script>
+const KEY='hub.plugins';
+const $=id=>document.getElementById(id);
+const BB='https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/';
+const DEMO={id:'demo',name:'Demo abierto',version:'1.0.0',author:'Blender Foundation',description:'Películas abiertas de ejemplo',contentRating:'all',items:[
+  {title:'Big Buck Bunny',description:'Corto animado de código abierto.',type:'video',url:BB+'BigBuckBunny.mp4'},
+  {title:'Sintel',description:'Corto animado de la Blender Foundation.',type:'video',url:BB+'Sintel.mp4'},
+  {title:'Elephants Dream',description:'Primer película abierta de Blender.',type:'video',url:BB+'ElephantsDream.mp4'}]};
+
+let plugins=readStore();
+function readStore(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch{return[]}}
+function writeStore(){try{localStorage.setItem(KEY,JSON.stringify(plugins))}catch{}}
+function say(t,err){const m=$('msg');m.textContent=t;m.className='msg'+(err?' err':'')}
+const https=u=>{try{return new URL(u).protocol==='https:'}catch{return false}};
+const str=(v,n)=>typeof v==='string'?v.slice(0,n):'';
+const absolute=(u,base)=>{try{return new URL(u,base||location.href).href}catch{return''}};
+
+function manifestUrl(v){
+  v=v.trim();
+  return /^[\w.-]+\/[\w.-]+$/.test(v)?`https://raw.githubusercontent.com/${v}/main/manifest.json`:v;
+}
+function cleanManifest(m){
+  if(!m||typeof m!=='object') throw new Error('El manifest no es válido.');
+  const id=str(m.id,60),name=str(m.name,60);
+  if(!/^[\w-]+$/.test(id)||!name) throw new Error('Faltan "id" o "name" en el manifest.');
+  if(!m.items&&!m.catalog&&!m.searchUrl) throw new Error('El plugin necesita "catalog", "items" o "searchUrl".');
+  return {id,name,version:str(m.version,20),author:str(m.author,60),description:str(m.description,200),
+    contentRating:m.contentRating==='adult'?'adult':'all',items:Array.isArray(m.items)?m.items:null,
+    catalog:str(m.catalog,300),searchUrl:str(m.searchUrl,300)};
+}
+async function install(input){
+  let url=null,raw=DEMO;
+  if(input!==DEMO){
+    url=manifestUrl(input);
+    if(!https(url)) throw new Error('La URL debe empezar con https://');
+    const r=await fetch(url);
+    if(!r.ok) throw new Error('No se pudo leer el manifest (error '+r.status+').');
+    raw=await r.json();
+  }
+  const m=cleanManifest(raw);
+  if(m.contentRating==='adult'&&!confirm('Este plugin declara contenido +18. ¿Querés instalarlo?')) return false;
+  plugins=plugins.filter(p=>p.manifest.id!==m.id).concat({url,manifest:m});
+  writeStore();renderChips();say(m.name+' instalado.');
+  return true;
+}
+function cleanItem(it,p){
+  if(!it||typeof it!=='object') return null;
+  const title=str(it.title,120);
+  if(!title) return null;
+  const type=['video','youtube','link'].includes(it.type)?it.type:'link';
+  const o={title,description:str(it.description,500),type,plugin:p.manifest.name,subtitles:[]};
+  if(type==='youtube'){
+    if(!/^[\w-]{11}$/.test(it.youtubeId||'')) return null;
+    o.youtubeId=it.youtubeId;
+  }else{
+    o.url=absolute(it.url,p.url);
+    if(!https(o.url)) return null;
+  }
+  if(it.poster){const u=absolute(it.poster,p.url);if(https(u)) o.poster=u}
+  (Array.isArray(it.subtitles)?it.subtitles:[]).slice(0,10).forEach(s=>{
+    const u=absolute(s&&s.url,p.url);
+    if(https(u)) o.subtitles.push({url:u,lang:str(s.lang,10)||'und',label:str(s.label,30)||'Subtítulos'});
+  });
+  return o;
+}
+async function getJson(u){
+  if(!https(u)) return null;
+  const r=await fetch(u);
+  return r.ok?r.json():null;
+}
+async function itemsFrom(p,q){
+  const m=p.manifest;
+  let list=null;
+  if(m.searchUrl&&q){
+    const d=await getJson(absolute(m.searchUrl.replace('{q}',encodeURIComponent(q)),p.url));
+    if(d&&Array.isArray(d.items)) return d.items.map(i=>cleanItem(i,p)).filter(Boolean);
+  }
+  if(m.items) list=m.items;
+  else if(m.catalog){const d=await getJson(absolute(m.catalog,p.url));list=d&&d.items}
+  const n=q.toLowerCase();
+  return (Array.isArray(list)?list:[]).map(i=>cleanItem(i,p)).filter(Boolean)
+    .filter(i=>!n||(i.title+' '+i.description).toLowerCase().includes(n));
+}
+async function search(q){
+  $('grid').replaceChildren();
+  if(!plugins.length){$('empty').textContent='Todavía no tenés plugins. Instalá el demo o pegá un repositorio de GitHub (usuario/repo).';return}
+  $('empty').textContent='Buscando…';
+  const res=await Promise.allSettled(plugins.map(p=>itemsFrom(p,q)));
+  const all=res.flatMap(r=>r.status==='fulfilled'?r.value:[]);
+  const failed=res.filter(r=>r.status==='rejected').length;
+  $('empty').textContent=(all.length?'':'Sin resultados.')+(failed?` ${failed} plugin(s) no respondieron.`:'');
+  all.forEach(it=>$('grid').append(card(it)));
+}
+function card(it){
+  const b=document.createElement('button');b.className='card';
+  let po;
+  if(it.poster){po=document.createElement('img');po.src=it.poster;po.alt='';po.loading='lazy';po.referrerPolicy='no-referrer'}
+  else{po=document.createElement('div');let h=0;for(const c of it.title)h=(h*31+c.charCodeAt(0))%360;
+    po.style.background=`hsl(${h} 45% 38%)`;po.textContent=it.title[0].toUpperCase()}
+  po.classList.add('poster');
+  const t=document.createElement('div');t.className='t';t.textContent=it.title;
+  const p=document.createElement('div');p.className='p';p.textContent=it.plugin;
+  b.append(po,t,p);b.onclick=()=>openItem(it);
+  return b;
+}
+function openItem(it){
+  const d=$('dlg');d.replaceChildren();
+  const x=document.createElement('button');x.className='x';x.textContent='Cerrar';x.onclick=()=>d.close();
+  const h=document.createElement('h2');h.textContent=it.title;
+  const p=document.createElement('p');p.textContent=it.description;
+  let media;
+  if(it.type==='video'){
+    media=document.createElement('video');media.controls=true;media.src=it.url;
+    it.subtitles.forEach((s,i)=>{const t=document.createElement('track');t.kind='subtitles';t.src=s.url;t.srclang=s.lang;t.label=s.label;if(!i)t.default=true;media.append(t)});
+  }else if(it.type==='youtube'){
+    media=document.createElement('iframe');
+    media.src='https://www.youtube-nocookie.com/embed/'+it.youtubeId;
+    media.allow='fullscreen; picture-in-picture';media.allowFullscreen=true;
+    media.setAttribute('sandbox','allow-scripts allow-same-origin allow-presentation');
+  }else{
+    media=document.createElement('a');media.href=it.url;media.target='_blank';
+    media.rel='noopener noreferrer';media.textContent='Abrir en el sitio original';
+  }
+  const s=document.createElement('p');s.className='msg';s.textContent='Plugin: '+it.plugin;
+  d.append(x,h,p,media,s);d.showModal();
+}
+$('dlg').addEventListener('close',()=>$('dlg').replaceChildren());
+function renderChips(){
+  const c=$('chips');c.replaceChildren();
+  plugins.forEach(p=>{
+    const s=document.createElement('span');s.className='chip';
+    s.textContent=p.manifest.name+(p.manifest.contentRating==='adult'?' (+18)':'');
+    const b=document.createElement('button');b.textContent='×';b.setAttribute('aria-label','Quitar '+p.manifest.name);
+    b.onclick=()=>{plugins=plugins.filter(x=>x!==p);writeStore();renderChips();search($('q').value.trim())};
+    s.append(b);c.append(s);
+  });
+}
+async function doInstall(v){
+  say('Instalando…');
+  try{
+    if(await install(v)){$('installInput').value='';search($('q').value.trim())}
+    else say('Instalación cancelada.');
+  }catch(err){say(err.message,true)}
+}
+$('installForm').onsubmit=e=>{e.preventDefault();if($('installInput').value.trim())doInstall($('installInput').value)};
+$('demoBtn').onclick=()=>doInstall(DEMO);
+$('searchForm').onsubmit=e=>{e.preventDefault();search($('q').value.trim())};
+renderChips();search('');
+</script>
+</body>
+</html>
