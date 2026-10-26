@@ -1,7 +1,7 @@
 {
   "plugins": [
     {
-      "repo": "martinmichelena2026-sketch/Mi-plugin",
+      "repo": "martinmichelena2026-sketch/Mi-primer-plugin",
       "name": "Mi primer plugin",
       "description": "Plugin de prueba con películas abiertas.",
       "contentRating": "all"
