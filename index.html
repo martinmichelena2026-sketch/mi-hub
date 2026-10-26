@@ -31,6 +31,11 @@ dialog{width:min(720px,94vw);padding:18px;border:1px solid var(--line);border-ra
 dialog::backdrop{background:rgba(0,0,0,.6)}
 video,iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:10px;background:#000}
 .x{float:right}
+details.reg{margin:0 0 22px;padding:4px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+details.reg summary{padding:10px 0;font-weight:600;cursor:pointer}
+.reg .it{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line)}
+.reg .it small{display:block;color:var(--muted)}
+.reg .note{margin:0;padding:8px 0 12px;font-size:.85rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -44,6 +49,11 @@ video,iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:10px;background
   </form>
   <div class="msg" id="msg" role="status"></div>
   <div class="chips" id="chips"></div>
+  <details class="reg" id="reg" open>
+    <summary>Plugins de la comunidad</summary>
+    <div id="regList"></div>
+    <p class="note">¿Querés publicar el tuyo? <a href="https://github.com/martinmichelena2026-sketch/mi-hub/issues/new" target="_blank" rel="noopener noreferrer">Envialo acá</a> con tu usuario/repositorio y lo revisamos.</p>
+  </details>
   <form class="row" id="searchForm">
     <input id="q" type="search" placeholder="¿Qué querés ver?" aria-label="Buscar">
     <button class="primary">Buscar</button>
@@ -188,6 +198,7 @@ function renderChips(){
     b.onclick=()=>{plugins=plugins.filter(x=>x!==p);writeStore();renderChips();search($('q').value.trim())};
     s.append(b);c.append(s);
   });
+  renderRegistry();
 }
 async function doInstall(v){
   say('Instalando…');
@@ -199,7 +210,36 @@ async function doInstall(v){
 $('installForm').onsubmit=e=>{e.preventDefault();if($('installInput').value.trim())doInstall($('installInput').value)};
 $('demoBtn').onclick=()=>doInstall(DEMO);
 $('searchForm').onsubmit=e=>{e.preventDefault();search($('q').value.trim())};
-renderChips();search('');
+let registry=[];
+async function loadRegistry(){
+  try{
+    const r=await fetch('registry.json',{cache:'no-store'});
+    const d=r.ok?await r.json():null;
+    registry=(d&&Array.isArray(d.plugins)?d.plugins:[]).filter(x=>x&&/^[\w.-]+\/[\w.-]+$/.test(x.repo||'')).slice(0,100);
+  }catch{registry=[]}
+  renderRegistry();
+}
+function renderRegistry(){
+  const box=$('regList');box.replaceChildren();
+  if(!registry.length){
+    const e=document.createElement('p');e.className='note';e.textContent='Todavía no hay plugins en la lista.';
+    box.append(e);return;
+  }
+  registry.forEach(x=>{
+    const row=document.createElement('div');row.className='it';
+    const info=document.createElement('div');
+    const n=document.createElement('strong');n.textContent=str(x.name,60)||x.repo;
+    const s=document.createElement('small');
+    s.textContent=str(x.description,140)+(x.contentRating==='adult'?' (+18)':'');
+    info.append(n,s);
+    const done=plugins.some(p=>p.url===manifestUrl(x.repo));
+    const b=document.createElement('button');
+    b.textContent=done?'Instalado':'Instalar';b.disabled=done;
+    b.onclick=()=>doInstall(x.repo);
+    row.append(info,b);box.append(row);
+  });
+}
+renderChips();search('');loadRegistry();
 </script>
 </body>
 </html>
